@@ -736,7 +736,7 @@ generate_ticker_links(
     close_csv="./my_project/download/time_series/close.csv",
     output_folder="./my_project/layer_1/links/"
 )
-!pip install -q transformers torch beautifulsoup4 requests tqdm
+# Note: required packages should be installed in the environment; removed inline pip install
 import os
 import gc
 import time
@@ -870,47 +870,63 @@ def compute_sentiment_batch(texts):
     
     FIXED: Now uses correct label indices from model config.
     """
-    if not texts:
-        return []
-    
+    """
+    Compute sentiment probabilities for a batch of texts.
+
+    Returns a list of dicts for each input text in order with keys:
+      {'pos': float, 'neg': float, 'neu': float, 'net': float}
+    Empty or failed texts will have pos/neg/neu = DEFAULT_SCORE, net = 0.
+    """
     results = []
+    if not texts:
+        return results
+
     try:
-        # Filter out empty texts
-        valid_texts = [(i, t) for i, t in enumerate(texts) if t.strip()]
-        if not valid_texts:
-            return [DEFAULT_SCORE] * len(texts)
-        
-        indices, text_list = zip(*valid_texts)
-        
-        # Tokenize batch
-        inputs = tokenizer(
-            list(text_list), 
-            truncation=True, 
-            max_length=512, 
-            padding=True,
-            return_tensors="pt"
-        )
-        inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
-            probs = torch.softmax(logits, dim=1)
-            
-            # CRITICAL FIX: Use correct label indices
-            # Standard FinBERT: 0=positive, 1=negative, 2=neutral
-            scores = probs[:, POS_IDX] - probs[:, NEG_IDX]
-            normalized_scores = ((scores + 1) / 2).cpu().tolist()
-        
-        # Map back to original indices
-        result_map = {idx: score for idx, score in zip(indices, normalized_scores)}
-        results = [result_map.get(i, DEFAULT_SCORE) for i in range(len(texts))]
-        
+        valid_texts = [(i, t) for i, t in enumerate(texts) if isinstance(t, str) and t.strip()]
+        indices, text_list = (zip(*valid_texts) if valid_texts else ([], []))
+
+        if valid_texts:
+            # Tokenize batch
+            inputs = tokenizer(
+                list(text_list),
+                truncation=True,
+                max_length=512,
+                padding=True,
+                return_tensors="pt",
+            )
+            inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits
+                probs = torch.softmax(logits, dim=1).cpu().numpy()
+
+            # For each valid text, capture prob vector
+            prob_map = {}
+            for idx, p in zip(indices, probs):
+                # Ensure ordering: POS_IDX, NEG_IDX, NEUTRAL_IDX
+                p_pos = float(p[POS_IDX])
+                p_neg = float(p[NEG_IDX])
+                p_neu = float(p[NEUTRAL_IDX])
+                net = p_pos - p_neg
+                prob_map[idx] = {"pos": p_pos, "neg": p_neg, "neu": p_neu, "net": net}
+        else:
+            prob_map = {}
+
+        # Build results keeping original order
+        for i, txt in enumerate(texts):
+            if i in prob_map:
+                results.append(prob_map[i])
+            else:
+                # Blank or failed text
+                results.append({"pos": DEFAULT_SCORE, "neg": DEFAULT_SCORE, "neu": DEFAULT_SCORE, "net": 0.0})
+
     except Exception as e:
-        with open(ERROR_LOG, "a", encoding='utf-8') as f:
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
             f.write(f"Batch sentiment computation failed | Error: {str(e)}\n")
-        results = [DEFAULT_SCORE] * len(texts)
-    
+        # On failure, return default dicts
+        results = [{"pos": DEFAULT_SCORE, "neg": DEFAULT_SCORE, "neu": DEFAULT_SCORE, "net": 0.0} for _ in texts]
+
     return results
 
 def load_checkpoint():
@@ -997,11 +1013,11 @@ def process_all_csv(input_folder=INPUT_FOLDER, output_folder=OUTPUT_FOLDER):
             for url in tqdm(url_batch, desc=f"  🌐 Scraping URLs", position=1, leave=False):
                 text = scrape_text(url, session, scraped_cache)
                 texts.append(text)
-            
+
             # Save cache periodically
             save_scraped_cache(scraped_cache)
-            
-            # Compute sentiments in batches
+
+            # Compute sentiments in batches (returns list of dicts with pos/neg/neu/net)
             all_scores = []
             num_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
             with tqdm(total=num_batches, desc=f"  🧠 Computing Sentiment", position=1, leave=False) as pbar:
@@ -1010,18 +1026,65 @@ def process_all_csv(input_folder=INPUT_FOLDER, output_folder=OUTPUT_FOLDER):
                     scores = compute_sentiment_batch(batch)
                     all_scores.extend(scores)
                     pbar.update(1)
-            
-            # Fill output dataframe
+
+            # Fill output dataframe (legacy cell-level scores: store net score)
             for (row_idx, col), score in zip(url_positions, all_scores):
-                output_df.at[row_idx, col] = score
-            
-            # Calculate statistics
-            score_values = [s for s in all_scores if s != DEFAULT_SCORE]
-            if score_values:
-                avg_score = sum(score_values) / len(score_values)
-                tqdm.write(f"  📈 Average sentiment: {avg_score:.3f} (range: {min(score_values):.3f}-{max(score_values):.3f})")
-            
-            # Save processed CSV
+                # store net score for backward compatibility
+                output_df.at[row_idx, col] = score.get('net', 0.0) if isinstance(score, dict) else score
+
+            # Aggregate per-period features for this ticker
+            # period -> list of indices into url_batch/texts/all_scores
+            period_to_indices = {}
+            for idx, (row_idx, col) in enumerate(url_positions):
+                period_to_indices.setdefault(row_idx, []).append(idx)
+
+            feature_rows = []
+            for period in df.index:
+                idxs = period_to_indices.get(period, [])
+                # select only indices with non-empty scraped text
+                valid_idxs = [i for i in idxs if i < len(texts) and isinstance(texts[i], str) and texts[i].strip()]
+
+                if not valid_idxs:
+                    # no articles -> default values
+                    p_pos = DEFAULT_SCORE
+                    p_neg = DEFAULT_SCORE
+                    p_neu = DEFAULT_SCORE
+                    net_mean = p_pos - p_neg
+                    N = 0
+                    sigma = 0.0
+                else:
+                    pos_vals = [all_scores[i]['pos'] for i in valid_idxs]
+                    neg_vals = [all_scores[i]['neg'] for i in valid_idxs]
+                    neu_vals = [all_scores[i]['neu'] for i in valid_idxs]
+                    net_vals = [all_scores[i]['net'] for i in valid_idxs]
+
+                    p_pos = float(sum(pos_vals) / len(pos_vals))
+                    p_neg = float(sum(neg_vals) / len(neg_vals))
+                    p_neu = float(sum(neu_vals) / len(neu_vals))
+                    net_mean = float(sum(net_vals) / len(net_vals))
+                    N = len(valid_idxs)
+                    sigma = float(pd.Series(net_vals).std(ddof=0)) if len(net_vals) > 1 else 0.0
+
+                feature_rows.append({
+                    'period': period,
+                    'bar_s': net_mean,
+                    'p_pos': p_pos,
+                    'p_neg': p_neg,
+                    'p_neu': p_neu,
+                    'N': N,
+                    'sigma': sigma
+                })
+
+            ticker_features = pd.DataFrame(feature_rows).set_index('period')
+
+            # Save per-ticker features
+            agg_dir = os.path.join(output_folder, 'aggregated')
+            os.makedirs(agg_dir, exist_ok=True)
+            agg_path = os.path.join(agg_dir, f"{os.path.splitext(basename)[0]}_sentiment_features.csv")
+            ticker_features.to_csv(agg_path, index=True)
+            tqdm.write(f"💾 Saved per-ticker features: {agg_path}")
+
+            # Save legacy processed CSV (net scores per term)
             output_path = os.path.join(output_folder, basename)
             output_df.to_csv(output_path, index=True)
             tqdm.write(f"✅ Saved: {output_path}")

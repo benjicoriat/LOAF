@@ -57,11 +57,15 @@ def train_layer1(
         np.random.seed(seed)
         
         # Create environment
+        # Ensure we have enough data for the environment
+        warmup_period = 20  # For volatility calculation
+        env_dates = train_dates[warmup_period:]
+        
         env = OptionsTradingEnv(
             all_tickers=all_tickers,
             obs_df=obs_df,
             price_data=price_data,
-            train_dates=train_dates,
+            train_dates=env_dates,
             num_days=num_days
         )
         

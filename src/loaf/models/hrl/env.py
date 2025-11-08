@@ -12,86 +12,79 @@ from ...models.hrl.rewards import options_reward_pipeline
 class OptionsTradingEnv(gym.Env):
     """
     Custom Gym environment for options trading with multiple tickers.
-    
-    Attributes:
-        observation_space: Normalized quantitative vectors
-        action_space: Allocation vector with constraints |x|<1, sum=1
-        reward: Output from options_reward_pipeline
+
+    Observation: a 1-D vector with one numeric observation per ticker (e.g. normalized price).
+    Action: allocation vector with values in [-1, 1]. Positive values = calls, negative = puts.
     """
-    metadata = {'render.modes': ['human']}
-    
+
+    metadata = {"render.modes": ["human"]}
+
     def __init__(
         self,
         all_tickers: list,
         obs_df: pd.DataFrame,
         price_data: pd.DataFrame,
-        train_dates: list,
+        train_dates,
         num_days: int = 10,
-        risk_free_rate: float = 0.05
+        risk_free_rate: float = 0.05,
     ):
         super(OptionsTradingEnv, self).__init__()
-        
+
+        # Ensure train_dates is a DatetimeIndex
+        train_dates = pd.DatetimeIndex(train_dates)
+
         self.all_tickers = all_tickers
         self.price_data = price_data
-        self.obs_df = obs_df
-        self.train_dates = train_dates
+
+        # Align observations to training dates and keep only those dates
+        common_idx = obs_df.index.intersection(train_dates)
+        self.obs_df = obs_df.reindex(common_idx).fillna(method="ffill").fillna(0)
+        self.train_dates = self.obs_df.index
+
         self.num_days = num_days
         self.risk_free_rate = risk_free_rate
-        
+
         self.n_tickers = len(all_tickers)
         self.current_step = 0
-        
-        # Define spaces
-        self.action_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
-            shape=(self.n_tickers,),
-            dtype=np.float32
-        )
-        
-        self.observation_space = spaces.Box(
-            low=0,
-            high=np.inf,
-            shape=(self.n_tickers, self.obs_df.shape[1]),
-            dtype=np.float32
-        )
-    
+
+        # Validate data
+        if len(self.train_dates) == 0:
+            raise ValueError("No valid training dates available after alignment with observations")
+        missing = [t for t in self.all_tickers if t not in self.obs_df.columns]
+        if missing:
+            raise ValueError(f"Missing ticker columns in obs_df: {missing}")
+
+        # Action: one value per ticker
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.n_tickers,), dtype=np.float32)
+
+        # Observation: flattened vector (one scalar per ticker)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_tickers,), dtype=np.float32)
+
     def reset(self) -> np.ndarray:
-        """Reset the environment to initial state."""
+        """Reset the environment to the initial state and return first observation."""
         self.current_step = 0
         return self._get_obs()
-    
+
     def _get_obs(self) -> np.ndarray:
-        """Get current observation."""
-        date = self.train_dates[self.current_step]
-        obs = self.obs_df.loc[date].values
-        return obs.astype(np.float32)
-    
+        """Return the observation for the current step as a 1-D numpy array."""
+        try:
+            date = self.train_dates[self.current_step]
+            obs = np.array([self.obs_df.loc[date, t] for t in self.all_tickers], dtype=np.float32)
+        except Exception:
+            obs = np.zeros(self.n_tickers, dtype=np.float32)
+        return obs
+
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-        """
-        Take a step in the environment.
-        
-        Args:
-            action: Action vector for ticker allocations
-            
-        Returns:
-            Tuple containing:
-            - observation
-            - reward
-            - done flag
-            - info dictionary
-        """
-        # Enforce constraints
-        action = np.clip(action, -1 + 1e-6, 1 - 1e-6)
-        if np.any(action < 0):
-            # Allow negative allocations for puts
-            sum_abs = np.sum(np.abs(action))
-            if sum_abs > 0:
-                action = action / sum_abs
-        else:
-            action = action / (np.sum(action) + 1e-8)
-        
-        # Get current date and compute reward
+        """Apply action, compute reward, and return (obs, reward, done, info)."""
+        # Clip and normalize action to represent exposures
+        action = np.clip(np.array(action, dtype=float), -1.0, 1.0)
+
+        sum_pos = np.sum(action[action > 0])
+        sum_neg = np.abs(np.sum(action[action < 0]))
+        total_exposure = max(1e-6, sum_pos + sum_neg)
+        action = action / total_exposure
+
+        # Compute reward using reward pipeline
         date = self.train_dates[self.current_step]
         reward, pnl, wins, losses, partial_losses = options_reward_pipeline(
             date_t=date,
@@ -99,22 +92,14 @@ class OptionsTradingEnv(gym.Env):
             all_tickers=self.all_tickers,
             num_days=self.num_days,
             price_data=self.price_data,
-            risk_free_rate=self.risk_free_rate
+            risk_free_rate=self.risk_free_rate,
         )
-        
-        # Update state
+
+        # Advance step
         self.current_step += 1
         done = self.current_step >= len(self.train_dates)
-        
-        # Get next observation
-        obs = self._get_obs() if not done else np.zeros_like(self._get_obs())
-        
-        # Additional info
-        info = {
-            'pnl': pnl,
-            'wins': wins,
-            'losses': losses,
-            'partial_losses': partial_losses
-        }
-        
-        return obs, reward, done, info
+
+        obs = self._get_obs() if not done else np.zeros(self.n_tickers, dtype=np.float32)
+
+        info = {"pnl": pnl, "wins": wins, "losses": losses, "partial_losses": partial_losses}
+        return obs, float(reward), bool(done), info

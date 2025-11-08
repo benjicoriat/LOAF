@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from typing import Dict, List
 from datetime import datetime
 
+"""
+Configuration management for the LOAF system.
+"""
+
+from dataclasses import dataclass
+from typing import Dict, List
+from datetime import datetime
+
+
 @dataclass
 class MarketConfig:
     """Market universe configuration."""
@@ -25,11 +34,12 @@ class MarketConfig:
                 "Bonds/Defensive": ["TLT", "IEF", "SHY"]
             },
             date_ranges={
-                "Download": {"start": "2023-01-01", "end": datetime.now().strftime("%Y-%m-%d")},
-                "Training": {"start": "2023-01-01", "end": "2023-01-31"},
-                "Testing": {"start": "2023-01-31", "end": "2023-02-31"}
+                "Download": {"start": "2017-01-01", "end": datetime.now().strftime("%Y-%m-%d")},
+                "Training": {"start": "2017-01-01", "end": "2019-12-31"},
+                "Testing": {"start": "2020-01-01", "end": "2023-12-31"}
             }
         )
+
 
 @dataclass
 class NLPConfig:
@@ -39,6 +49,7 @@ class NLPConfig:
     request_delay: float = 1.0
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     batch_size: int = 8
+
 
 @dataclass
 class SystemConfig:

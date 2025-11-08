@@ -37,8 +37,8 @@ API_KEY = "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"
 
 # Date ranges
 DATES = {
-    "Download": {"start": "2023-01-01", "end": datetime.now().strftime("%Y-%m-%d")},
-    "Training": {"start": "2023-01-01", "end": "2023-02-28"},
+    "Download": {"start": "2022-01-01", "end": datetime.now().strftime("%Y-%m-%d")},
+    "Training": {"start": "2023-01-01", "end": "2023-02-28"},  # With enough historical data
     "Testing": {"start": "2023-03-01", "end": "2023-03-31"}
 }
 
@@ -161,9 +161,19 @@ def run_layer1_quant(data_paths):
     close_data = pd.read_csv(data_paths['close'], index_col=0, parse_dates=True)
     normalized_data = pd.read_csv(data_paths['normalized_close'], index_col=0, parse_dates=True)
     
-    # Split dates
-    train_dates = pd.date_range(DATES['Training']['start'], DATES['Training']['end'], freq='B')
-    test_dates = pd.date_range(DATES['Testing']['start'], DATES['Testing']['end'], freq='B')
+    # Filter out missing data
+    common_idx = close_data.dropna(how='any').index
+    close_data = close_data.loc[common_idx]
+    normalized_data = normalized_data.loc[common_idx]
+    
+    # Split dates, ensuring data availability
+    train_start = pd.Timestamp(DATES['Training']['start'])
+    train_end = pd.Timestamp(DATES['Training']['end'])
+    test_start = pd.Timestamp(DATES['Testing']['start'])
+    test_end = pd.Timestamp(DATES['Testing']['end'])
+    
+    train_dates = pd.date_range(train_start, train_end, freq='B').intersection(common_idx)
+    test_dates = pd.date_range(test_start, test_end, freq='B').intersection(common_idx)
     
     # Initialize and run pipeline
     pipeline = HRLPipeline(

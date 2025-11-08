@@ -71,12 +71,18 @@ def options_reward_pipeline(
         - num_loss: Number of total losses
         - num_partial_loss: Number of partial losses
     """
-    # Validate action vector
+    # Validate and normalize action vector if needed
     action_vector = np.array(action_vector, dtype=float)
-    if not np.isclose(action_vector.sum(), 1.0, atol=1e-4):
-        raise ValueError(f"Action vector sum != 1: {action_vector.sum()}")
-    if np.any(np.abs(action_vector) >= 1.0):
-        raise ValueError("All action_vector elements must be < 1 in absolute value")
+    
+    # Ensure no individual action exceeds bounds
+    if np.any(np.abs(action_vector) > 1.0):
+        action_vector = np.clip(action_vector, -1.0, 1.0)
+        
+    # Normalize by total exposure
+    sum_pos = np.sum(action_vector[action_vector > 0])
+    sum_neg = np.abs(np.sum(action_vector[action_vector < 0]))
+    total_exposure = max(1e-6, sum_pos + sum_neg)
+    action_vector = action_vector / total_exposure  # This ensures sum of absolute values = 1
 
     # Ensure date exists
     if date_t not in price_data.index:
