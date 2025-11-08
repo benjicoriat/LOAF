@@ -1,0 +1,12 @@
+README.md
+setup.py
+src/loaf/__init__.py
+src/loaf/pipeline.py
+src/loaf.egg-info/PKG-INFO
+src/loaf.egg-info/SOURCES.txt
+src/loaf.egg-info/dependency_links.txt
+src/loaf.egg-info/requires.txt
+src/loaf.egg-info/top_level.txt
+tests/test_core.py
+tests/test_market_data.py
+tests/test_nlp_processing.py

@@ -1,0 +1,45 @@
+# Core dependencies
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+scikit-learn>=0.24.2
+
+# Deep Learning
+torch>=1.9.0
+transformers>=4.9.0
+
+# Market Data
+yfinance>=0.1.63
+alpha_vantage>=2.3.1
+pandas-datareader>=0.9.0
+
+# Technical Analysis
+ta-lib>=0.4.19
+pandas-ta>=0.3.14b
+
+# NLP Processing
+nltk>=3.6.3
+textblob>=0.15.3
+beautifulsoup4>=4.9.3
+newspaper3k>=0.2.8
+vaderSentiment>=3.3.2
+
+# Visualization
+matplotlib>=3.4.3
+seaborn>=0.11.2
+plotly>=5.1.0
+mplfinance>=0.12.7a17
+
+# Machine Learning
+gymnasium>=0.26.3
+stable-baselines3>=1.5.0
+
+# Utilities
+tqdm>=4.62.3
+PyYAML>=5.4.1
+joblib>=1.0.1
+pytest>=6.2.5
+
+# Optional but recommended
+jupyterlab>=3.1.0
+ipywidgets>=7.6.5

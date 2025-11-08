@@ -1,0 +1,20 @@
+Metadata-Version: 2.4
+Name: loaf
+Version: 0.1.0
+Summary: LOAF - Market Analysis System with ML Capabilities
+Author: benjicoriat
+Requires-Python: >=3.8
+Requires-Dist: yfinance
+Requires-Dist: stable-baselines3
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: matplotlib
+Requires-Dist: requests
+Requires-Dist: beautifulsoup4
+Requires-Dist: transformers
+Requires-Dist: torch
+Requires-Dist: tqdm
+Dynamic: author
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

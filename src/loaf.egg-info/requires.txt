@@ -1,0 +1,10 @@
+yfinance
+stable-baselines3
+pandas
+numpy
+matplotlib
+requests
+beautifulsoup4
+transformers
+torch
+tqdm
